@@ -1,0 +1,6 @@
+FROM python:3.12-alpine
+WORKDIR /app
+
+COPY . .
+
+ENTRYPOINT ["sh", "-c", "python tests/test_parser.py && python tests/test_protocol.py"]

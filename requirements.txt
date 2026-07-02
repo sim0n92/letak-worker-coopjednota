@@ -1,0 +1,2 @@
+# Intentionally empty: fetch/parsing use only the Python standard library
+# (urllib, re, json) to keep the image small and deterministic.
