@@ -172,51 +172,44 @@ class CoopjednotaWorker(ProcessClass):
             raise ManagedError("Missing required input field: outputPath", code="INVALID_INPUT", exit_code=EXIT_INPUT)
         known = set(input_data.get("knownLeaflets") or [])
         wanted = {str(t).lower() for t in (input_data.get("types") or [])}
+        url = input_data.get("pageUrl") or coopjednota.DEFAULT_URL
 
-        sources = dict(coopjednota.DEFAULT_URLS)
-        sources.update(input_data.get("pageUrls") or {})
-        if wanted:
-            sources = {name: url for name, url in sources.items() if name.lower() in wanted}
+        self.report(10, f"Fetching {url}")
+        try:
+            listing = coopjednota.fetch(url)
+        except Exception as e:
+            raise ManagedError(f"Failed to fetch leaflet list: {e}", code="FETCH_FAILED", exit_code=EXIT_DEPENDENCY) from e
+        stubs = coopjednota.parse_listing(listing, base_url=url)
+        if not stubs:
+            # the list always carries the current leaflets: none parsed = the page layout changed
+            raise ManagedError(f"No leaflets found on {url} - page layout changed?", code="NO_LEAFLETS",
+                               exit_code=EXIT_DEPENDENCY)
+        stubs = [s for s in stubs if (not wanted or s["type"].lower() in wanted)
+                 and coopjednota.leaflet_key(s["type"], s["validFrom"], s["validTo"], s["slug"]) not in known]
 
-        all_leaflets: list[dict] = []
-        errors: list[str] = []
-        total = len(sources)
-        for i, (leaflet_type, url) in enumerate(sources.items()):
+        # leaflet page -> InDesign viewer -> PDF, only for the leaflets we report
+        matched, no_pdf = [], []
+        for i, s in enumerate(stubs):
             if self.terminate_requested.is_set():
                 raise ManagedError("Terminated during fetch", code="TERMINATED", exit_code=EXIT_ERROR)
-            self.report(10 + int(60 * i / max(total, 1)), f"Fetching {leaflet_type} ({url})")
+            self.report(20 + int(60 * i / max(len(stubs), 1)), f"Resolving PDF of {s['name']}")
+            pdf = None
             try:
-                html = coopjednota.fetch(url)
+                viewer = coopjednota.parse_viewer_url(coopjednota.fetch(s["detailUrl"]), s["detailUrl"])
+                if viewer:
+                    pdf = coopjednota.parse_pdf_url(coopjednota.fetch(viewer), viewer)
             except Exception as e:
-                self.logger.warning("Failed to fetch %s (%s): %s", leaflet_type, url, e)
-                errors.append(f"{leaflet_type}: {e}")
-                continue
-            all_leaflets.extend(coopjednota.parse_leaflets(html, leaflet_type))
-
-        if not all_leaflets and errors:
-            raise ManagedError(
-                f"Failed to fetch any leaflet page: {'; '.join(errors)}",
-                code="FETCH_FAILED",
-                exit_code=EXIT_DEPENDENCY,
-            )
-
-        self.report(80, "Filtering leaflets")
-        matched = [
-            {
-                "type": lf["type"],
-                "from": lf["validFrom"],
-                "to": lf["validTo"],
-                "id": lf["id"],
-                "url": lf["pdfUrl"],
-            }
-            for lf in all_leaflets
-            if (not wanted or lf["type"].lower() in wanted)
-            and coopjednota.leaflet_key(lf["type"], lf["validFrom"], lf["validTo"], lf["id"]) not in known
-        ]
+                self.logger.warning("Failed to resolve the PDF of %s: %s", s["detailUrl"], e)
+            if not pdf:
+                no_pdf.append(s["name"]); continue
+            matched.append({"type": s["type"], "from": s["validFrom"], "to": s["validTo"], "id": s["slug"], "url": pdf})
+        if no_pdf:
+            raise ManagedError(f"No PDF found for {no_pdf} - leaflet page or viewer layout changed?",
+                               code="PDF_NOT_FOUND", exit_code=EXIT_DEPENDENCY)
 
         self.report(90, "Writing output")
         result_doc = {
-            "sources": {name: url for name, url in sources.items()},
+            "source": url,
             "types": sorted(wanted) or None,
             "hasNew": bool(matched),
             "count": len(matched),

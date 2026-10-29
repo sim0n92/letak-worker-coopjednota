@@ -1,48 +1,36 @@
-"""Pure parsing functions for the COOP Jednota Slovensko leaflet pages.
+"""Pure parsing functions for the COOP Jednota Slovensko leaflets.
 
-coop.sk renders each leaflet listing server-side (plain HTML, no XHR/JSON), so
-pages can be parsed with plain regex - no JS execution needed.
+Since 2026-10 coop.sk lists every active leaflet on ONE page (https://www.coop.sk/letaky) and publishes the
+list as JSON-LD (schema.org CollectionPage -> ItemList of DigitalDocument: name, url, temporalCoverage
+"start/end"). The old per-banner pages (/sk/pdfflip/1..3) no longer carry leaflets.
 
-Unlike a single retailer page, COOP Jednota publishes three separate listing
-pages, one per store banner ("type"): Tempo, Supermarket, Potraviny (mapped to
-"CoopPotraviny" to avoid a bare, ambiguous type name). Each page is a flat list
-of currently active leaflets for that banner - no current/future tabs.
+A leaflet's own page embeds it in an Adobe InDesign Publish Online iframe (indd.adobe.com/view/<id>). The
+viewer page carries the publication manifest: `documentPdf` (the PDF's path inside the publication) and
+`VERSION_PREFIX`; the PDF is served at indd.adobe.com/view/publication/<id>/<VERSION_PREFIX>/<documentPdf>.
 
-COOP Jednota is a federation of regional cooperatives, so the SAME banner can
-publish MULTIPLE distinct leaflets for the SAME validity date range at once
-(regional variants) - the page gives no readable region/store label to tell
-them apart, only a stable internal record id embedded in the PDF path
-(".../flip_<id>/pdf_<id>.pdf"). Because of this, novelty here uses a
-coopjednota-specific 4-part key (type|from|to|id) instead of the 3-part
-type|from|to key used by the other chains - see leaflet_key() below.
+Banner ("type") from the leaflet name: "Potraviny, Supermarket a Tempo" -> "CoopPotraviny" (the
+nationwide leaflet of the small and mid stores), "Tempo" -> "Tempo", "Regionálny leták COOP Jednota <town>"
+-> "Regional" (a regional cooperative's own leaflet).
+
+COOP Jednota is a federation of regional cooperatives, so several leaflets can share type and validity
+(regional ones); novelty uses a coopjednota-specific 4-part key type|from|to|slug (the slug of the
+leaflet's page, e.g. "tempo-43-2026") instead of the 3-part key of the other chains.
 """
 from __future__ import annotations
 
+import json
 import re
+import urllib.parse
 import urllib.request
 
-DEFAULT_URLS = {
-    "Tempo": "https://coop.sk/sk/pdfflip/1",
-    "Supermarket": "https://coop.sk/sk/pdfflip/2",
-    "CoopPotraviny": "https://coop.sk/sk/pdfflip/3",
-}
+DEFAULT_URL = "https://www.coop.sk/letaky"
 DEFAULT_TIMEOUT = 15  # seconds per request
 
-_USER_AGENT = "Mozilla/5.0 (compatible; letak-worker-coopjednota/1.0; +https://github.com/sim0n92/letak-worker-coopjednota)"
+_USER_AGENT = "Mozilla/5.0 (compatible; letak-worker-coopjednota/1.1; +https://github.com/sim0n92/letak-worker-coopjednota)"
 
-_BOX_RE = re.compile(
-    r'<div class="_df_thumb" id="df_intro_thumb_(?P<id>\d+)"\s*'
-    r'source="(?P<pdf>[^"]+)"\s*'
-    r'thumb="(?P<thumb>[^"]*)"\s*'
-    r'backgroundColor="[^"]*">\s*'
-    r'(?P<title>[^<]*?)\s*</div>'
-    r'.*?<span>(?P<daterange>[^<]*)</span>',
-    re.S,
-)
-
-_DATE_RANGE_RE = re.compile(
-    r"(\d{1,2})\.\s*(\d{1,2})\.\s*-\s*(\d{1,2})\.\s*(\d{1,2})\s*\.\s*(\d{4})"
-)
+_LD_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
+_IFRAME_RE = re.compile(r'<iframe[^>]*\bsrc="(?P<src>[^"]*indd\.adobe\.com/view/[^"]+)"')
+_VIEWER_DATA_RE = re.compile(r"readerViewDataFromServer\s*=\s*(\{.*?\})\s*</script>", re.S)
 
 
 def fetch(url: str, timeout: int = DEFAULT_TIMEOUT) -> str:
@@ -52,54 +40,74 @@ def fetch(url: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         return resp.read().decode("utf-8", errors="replace")
 
 
-def _parse_date_range(text: str) -> tuple[str, str] | None:
-    """Parse "02. 07. - 08. 07 .2026" -> ("2026-07-02", "2026-07-08").
+def banner_of(name: str) -> str:
+    """The store banner of a leaflet from its name on the listing."""
+    n = " ".join(name.split()).lower()
+    if n.startswith("regionálny"):
+        return "Regional"
+    if "potraviny" in n:
+        return "CoopPotraviny"
+    if n == "tempo":
+        return "Tempo"
+    return name.strip()
 
-    Only the end year is present in the source text; the start year rolls back
-    one year when the start month is after the end month (December -> January).
+
+def parse_listing(html: str, base_url: str = DEFAULT_URL) -> list[dict]:
+    """The listing's JSON-LD ItemList -> leaflet stubs (type, name, slug, validity, detail page URL).
+
+    Validity comes from temporalCoverage "2026-10-29T00:00:02+01:00/2026-11-04T23:59:59+01:00": the dates are
+    printed in local time (their own offset), so the date part is the Slovak calendar date.
     """
-    m = _DATE_RANGE_RE.search(text)
+    items = []
+    for block in _LD_RE.findall(html):
+        try:
+            doc = json.loads(block)
+        except ValueError:
+            continue
+        if doc.get("@type") != "CollectionPage":
+            continue
+        for el in (doc.get("mainEntity") or {}).get("itemListElement") or []:
+            item = el.get("item") or {}
+            start, _, end = (item.get("temporalCoverage") or "").partition("/")
+            if not (item.get("url") and start[:10] and end[:10]):
+                continue
+            url = urllib.parse.urljoin(base_url, item["url"])
+            items.append({
+                "type": banner_of(item.get("name") or ""),
+                "name": " ".join((item.get("name") or "").split()),
+                "slug": re.sub(r"\.html?$", "", url.rstrip("/").rsplit("/", 1)[-1]),
+                "validFrom": start[:10],
+                "validTo": end[:10],
+                "detailUrl": url,
+            })
+    return items
+
+
+def parse_viewer_url(detail_html: str, base_url: str) -> str | None:
+    """The Adobe InDesign viewer the leaflet page embeds, or None."""
+    m = _IFRAME_RE.search(detail_html)
+    return urllib.parse.urljoin(base_url, m.group("src")) if m else None
+
+
+def parse_pdf_url(viewer_html: str, viewer_url: str) -> str | None:
+    """The PDF of an InDesign Publish Online publication: <view>/publication/<id>/<VERSION_PREFIX>/<documentPdf>."""
+    m = _VIEWER_DATA_RE.search(viewer_html)
     if not m:
         return None
-    from_day, from_month, to_day, to_month, to_year = (int(g) for g in m.groups())
-    from_year = to_year - 1 if from_month > to_month else to_year
-    valid_from = f"{from_year:04d}-{from_month:02d}-{from_day:02d}"
-    valid_to = f"{to_year:04d}-{to_month:02d}-{to_day:02d}"
-    return valid_from, valid_to
-
-
-def parse_leaflets(html: str, leaflet_type: str) -> list[dict]:
-    """Parse a single banner listing page into leaflet records.
-
-    leaflet_type is the canonical banner name for the page this HTML came
-    from (one of DEFAULT_URLS' keys) - it is NOT taken from the page's own
-    "_df_thumb" label text, which merely echoes the page context and carries
-    no extra information.
-    """
-    leaflets = []
-    for m in _BOX_RE.finditer(html):
-        date_range = _parse_date_range(m.group("daterange"))
-        if not date_range:
-            continue
-        valid_from, valid_to = date_range
-        leaflets.append(
-            {
-                "type": leaflet_type,
-                "id": m.group("id"),
-                "validFrom": valid_from,
-                "validTo": valid_to,
-                "pdfUrl": m.group("pdf"),
-                "thumbUrl": m.group("thumb") or None,
-            }
-        )
-    return leaflets
+    try:
+        data = json.loads(m.group(1))
+        manifest = json.loads(data["MANIFEST_BODY"])
+        pdf, prefix = manifest["documentPdf"], data["VERSION_PREFIX"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    pub_id = urllib.parse.urlparse(viewer_url).path.rstrip("/").rsplit("/", 1)[-1]
+    return urllib.parse.urljoin(viewer_url, f"publication/{pub_id}/{prefix}/{pdf}")
 
 
 def leaflet_key(leaflet_type: str, valid_from: str, valid_to: str, record_id: str) -> str:
-    """coopjednota-specific 4-part novelty key: type|from|to|id.
+    """coopjednota-specific 4-part novelty key: type|from|to|slug.
 
-    The extra `id` (stable internal record id, see module docstring) is
-    required here because regional variants can share type+from+to; other
-    chains use the plain 3-part type|from|to key.
+    The extra slug is required here because regional leaflets can share type+from+to; other chains use
+    the plain 3-part type|from|to key.
     """
     return f"{leaflet_type}|{valid_from}|{valid_to}|{record_id}"
