@@ -3,18 +3,19 @@
   "specVersion": "1.0",
   "type": "stdin",
   "name": "letak-worker-coopjednota",
-  "version": "1.0.0",
-  "description": "Detects new leaflets across COOP Jednota Slovensko's three store banners (Tempo, Supermarket, Potraviny) and returns their metadata + URLs (no downloads).",
+  "version": "1.1.0",
+  "description": "Detects new COOP Jednota Slovensko leaflets on coop.sk/letaky (nationwide Potraviny/Supermarket/Tempo, Tempo, regional) and returns their metadata + PDF URLs (no downloads).",
   "author": "sim0n92",
   "repository": "https://github.com/sim0n92/letak-worker-coopjednota",
   "authentication": false,
-
   "actions": {
     "execute": {
-      "description": "Fetch coop.sk's three banner leaflet listing pages, parse leaflets, and return the ones not present in knownLeaflets.",
+      "description": "Fetch coop.sk/letaky (JSON-LD list), resolve each new leaflet's PDF through its Adobe InDesign viewer, and return the leaflets not present in knownLeaflets. A list without leaflets (NO_LEAFLETS) or a leaflet without PDF (PDF_NOT_FOUND) is an error.",
       "input": {
         "type": "object",
-        "required": ["outputPath"],
+        "required": [
+          "outputPath"
+        ],
         "properties": {
           "outputPath": {
             "type": "string",
@@ -22,47 +23,77 @@
           },
           "knownLeaflets": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "default": [],
-            "description": "Leaflet keys already known to the caller, each formatted as 'type|from|to|id'. NOTE: unlike other chains' 3-part 'type|from|to' key, coopjednota uses a 4-part key because its federated regional co-ops can publish multiple distinct leaflets under the same banner and date range at once - the 'id' disambiguates them."
+            "description": "Leaflet keys already known to the caller, each formatted as 'type|from|to|id' (id = the leaflet page slug, e.g. 'tempo-43-2026'). NOTE: unlike other chains' 3-part 'type|from|to' key, coopjednota uses a 4-part key because its federated regional co-ops can publish multiple distinct leaflets under the same banner and date range at once - the 'id' disambiguates them."
           },
           "types": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "default": [],
-            "description": "Case-insensitive banner filter: 'Tempo', 'Supermarket', 'CoopPotraviny'. Empty means all three."
+            "description": "Case-insensitive banner filter: 'CoopPotraviny' (the nationwide Potraviny, Supermarket a Tempo leaflet), 'Tempo', 'Regional'. Empty means all."
           },
-          "pageUrls": {
-            "type": "object",
-            "additionalProperties": { "type": "string" },
-            "description": "Override map of banner name -> listing page URL (e.g. {\"Tempo\": \"https://coop.sk/sk/pdfflip/1\"}). Merged over the three production defaults (Tempo, Supermarket, CoopPotraviny), so a partial override only replaces the given banner(s); unknown keys add extra banners."
+          "pageUrl": {
+            "type": "string",
+            "description": "Override for the leaflet list URL. Defaults to https://www.coop.sk/letaky"
           }
         }
       },
       "output": {
         "type": "object",
         "properties": {
-          "outputPath": { "type": "string" },
-          "count": { "type": "integer" },
-          "hasNew": { "type": "boolean" },
+          "outputPath": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "hasNew": {
+            "type": "boolean"
+          },
           "leaflets": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "type": { "type": "string", "description": "Store banner: 'Tempo', 'Supermarket', or 'CoopPotraviny'." },
-                "from": { "type": "string", "format": "date" },
-                "to": { "type": "string", "format": "date" },
+                "type": {
+                  "type": "string",
+                  "description": "Store banner: 'CoopPotraviny', 'Tempo' or 'Regional'."
+                },
+                "from": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "to": {
+                  "type": "string",
+                  "format": "date"
+                },
                 "id": {
                   "type": "string",
-                  "description": "Stable internal record id (from the PDF path, e.g. 'flip_1343' -> '1343'). Part of the novelty key alongside type+from+to (coopjednota-specific 4-part key, unlike the 3-part type|from|to key used by other chains) - required to tell apart regional-co-op variants that share the same type and date range."
+                  "description": "Slug of the leaflet's page on coop.sk (e.g. 'tempo-43-2026'). Part of the novelty key alongside type+from+to (coopjednota-specific 4-part key) - regional leaflets can share type and dates."
                 },
-                "url": { "type": "string", "format": "uri" }
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "Directly downloadable PDF (indd.adobe.com/view/publication/<id>/<version>/publication-web-resources/pdf/...)."
+                }
               },
-              "required": ["type", "from", "to", "id", "url"]
+              "required": [
+                "type",
+                "from",
+                "to",
+                "id",
+                "url"
+              ]
             }
           },
-          "fileSize": { "type": "integer" }
+          "fileSize": {
+            "type": "integer"
+          }
         }
       }
     },
@@ -71,18 +102,21 @@
       "input": {
         "type": "object",
         "properties": {
-          "originalExecutionId": { "type": "string" }
+          "originalExecutionId": {
+            "type": "string"
+          }
         }
       },
       "output": {
         "type": "object",
         "properties": {
-          "cleaned": { "type": "boolean" }
+          "cleaned": {
+            "type": "boolean"
+          }
         }
       }
     }
   },
-
   "execution": {
     "timeout": 180,
     "memoryLimit": "256Mi",
