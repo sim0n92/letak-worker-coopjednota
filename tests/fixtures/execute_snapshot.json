@@ -1,0 +1,43 @@
+{
+  "result": {
+    "count": 2,
+    "hasNew": true,
+    "leaflets": [
+      {
+        "type": "CoopPotraviny",
+        "from": "2026-01-01",
+        "to": "2026-01-07",
+        "id": "potraviny-1",
+        "url": "file:///C:/Users/Simon/AppData/Local/Temp/tmpis7kfdc4/site/indd.adobe.com/view/publication/pub-potraviny-1/v1/publication-web-resources/pdf/potraviny-1.pdf"
+      },
+      {
+        "type": "Regional",
+        "from": "2026-01-01",
+        "to": "2026-01-14",
+        "id": "nitra-1",
+        "url": "file:///C:/Users/Simon/AppData/Local/Temp/tmpis7kfdc4/site/indd.adobe.com/view/publication/pub-nitra-1/v1/publication-web-resources/pdf/nitra-1.pdf"
+      }
+    ]
+  },
+  "fileDoc": {
+    "types": null,
+    "hasNew": true,
+    "count": 2,
+    "leaflets": [
+      {
+        "type": "CoopPotraviny",
+        "from": "2026-01-01",
+        "to": "2026-01-07",
+        "id": "potraviny-1",
+        "url": "file:///C:/Users/Simon/AppData/Local/Temp/tmpis7kfdc4/site/indd.adobe.com/view/publication/pub-potraviny-1/v1/publication-web-resources/pdf/potraviny-1.pdf"
+      },
+      {
+        "type": "Regional",
+        "from": "2026-01-01",
+        "to": "2026-01-14",
+        "id": "nitra-1",
+        "url": "file:///C:/Users/Simon/AppData/Local/Temp/tmpis7kfdc4/site/indd.adobe.com/view/publication/pub-nitra-1/v1/publication-web-resources/pdf/nitra-1.pdf"
+      }
+    ]
+  }
+}
