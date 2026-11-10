@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import coopjednota
+import v11
 
 EXIT_OK, EXIT_ERROR, EXIT_INPUT, EXIT_TIMEOUT, EXIT_DEPENDENCY = 0, 1, 2, 3, 4
 LOG_DIR = Path(os.environ.get("LOG_DIR", "/logs"))
@@ -133,6 +134,8 @@ class ProcessClass:
                 return self._handle_execute()
             if action == "terminate":
                 return self._handle_terminate()
+            if action in v11.ACTIONS:
+                return self._handle_v11(action)
             raise ManagedError(f"Unknown action: {action!r}", code="UNKNOWN_ACTION", exit_code=EXIT_INPUT)
         except ManagedError as e:
             self.logger.error("%s", e)
@@ -152,6 +155,25 @@ class ProcessClass:
         self._emit_result(data)
         return EXIT_OK
 
+    def _handle_v11(self, action):
+        """Proc-protocol v1.1 actions: errors carry the three protocol codes, not the legacy ones."""
+        try:
+            if action == "spec":
+                self._emit_result(v11.spec())
+                return EXIT_OK
+            self._start_terminate_watcher()
+            problem = v11.input_problem(self._input_data)
+            if problem:
+                raise ManagedError(problem, code="INVALID_INPUT", exit_code=EXIT_INPUT)
+            data = self.v11_check(self._input_data) if action == "check" else self.v11_run(self._input_data)
+            self._emit_result(data)
+            return EXIT_OK
+        except ManagedError as e:
+            code = v11.classify(e.code)
+            self.logger.error("%s (%s)", e, code)
+            self._emit_error(str(e), code, v11.error_data(code))
+            return e.exit_code
+
     def _handle_terminate(self):
         self.report(0, "Termination requested...")
         self._emit_result({"cleaned": self.terminate()})
@@ -166,11 +188,17 @@ class ProcessClass:
 
 
 class CoopjednotaWorker(ProcessClass):
-    def execute(self, input_data):
-        output_path = input_data.get("outputPath")
-        if not output_path:
-            raise ManagedError("Missing required input field: outputPath", code="INVALID_INPUT", exit_code=EXIT_INPUT)
-        known = set(input_data.get("knownLeaflets") or [])
+    @staticmethod
+    def _key_of(leaflet):
+        return coopjednota.leaflet_key(leaflet["type"], leaflet["from"], leaflet["to"], leaflet["id"])
+
+    def _scan(self, input_data, known=frozenset()):
+        """Fetches and parses the leaflet list: every leaflet {type, from, to, id, url}.
+
+        The PDF (leaflet page -> InDesign viewer -> PDF) is resolved only for leaflets that pass the `types`
+        filter and are not in `known`; the others carry url None. Raises ManagedError with the legacy codes
+        (FETCH_FAILED, NO_LEAFLETS, PDF_NOT_FOUND, TERMINATED). Shared by execute, check and run.
+        """
         wanted = {str(t).lower() for t in (input_data.get("types") or [])}
         url = input_data.get("pageUrl") or coopjednota.DEFAULT_URL
 
@@ -184,14 +212,16 @@ class CoopjednotaWorker(ProcessClass):
             # the list always carries the current leaflets: none parsed = the page layout changed
             raise ManagedError(f"No leaflets found on {url} - page layout changed?", code="NO_LEAFLETS",
                                exit_code=EXIT_DEPENDENCY)
-        stubs = [s for s in stubs if (not wanted or s["type"].lower() in wanted)
-                 and coopjednota.leaflet_key(s["type"], s["validFrom"], s["validTo"], s["slug"]) not in known]
 
         # leaflet page -> InDesign viewer -> PDF, only for the leaflets we report
-        matched, no_pdf = [], []
+        found, no_pdf = [], []
         for i, s in enumerate(stubs):
             if self.terminate_requested.is_set():
                 raise ManagedError("Terminated during fetch", code="TERMINATED", exit_code=EXIT_ERROR)
+            leaflet = {"type": s["type"], "from": s["validFrom"], "to": s["validTo"], "id": s["slug"], "url": None}
+            found.append(leaflet)
+            if (wanted and s["type"].lower() not in wanted) or self._key_of(leaflet) in known:
+                continue
             self.report(20 + int(60 * i / max(len(stubs), 1)), f"Resolving PDF of {s['name']}")
             pdf = None
             try:
@@ -202,10 +232,32 @@ class CoopjednotaWorker(ProcessClass):
                 self.logger.warning("Failed to resolve the PDF of %s: %s", s["detailUrl"], e)
             if not pdf:
                 no_pdf.append(s["name"]); continue
-            matched.append({"type": s["type"], "from": s["validFrom"], "to": s["validTo"], "id": s["slug"], "url": pdf})
+            leaflet["url"] = pdf
         if no_pdf:
             raise ManagedError(f"No PDF found for {no_pdf} - leaflet page or viewer layout changed?",
                                code="PDF_NOT_FOUND", exit_code=EXIT_DEPENDENCY)
+        return found
+
+    def v11_check(self, input_data):
+        self._scan(input_data)
+        return {"ok": True}
+
+    def v11_run(self, input_data):
+        state = dict(input_data.get("state") or {})
+        state["seen"] = list(state.get("seen") or []) + list(input_data.get("knownLeaflets") or [])
+        wanted = {str(t).lower() for t in (input_data.get("types") or [])}
+        found = self._scan(input_data, known=set(state["seen"]))
+        return v11.build_run_result(found, wanted, state, self._key_of)
+
+    def execute(self, input_data):
+        output_path = input_data.get("outputPath")
+        if not output_path:
+            raise ManagedError("Missing required input field: outputPath", code="INVALID_INPUT", exit_code=EXIT_INPUT)
+        known = set(input_data.get("knownLeaflets") or [])
+        wanted = {str(t).lower() for t in (input_data.get("types") or [])}
+        url = input_data.get("pageUrl") or coopjednota.DEFAULT_URL
+
+        matched = [lf for lf in self._scan(input_data, known=known) if lf["url"]]
 
         self.report(90, "Writing output")
         result_doc = {

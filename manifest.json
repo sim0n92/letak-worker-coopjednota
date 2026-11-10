@@ -1,9 +1,9 @@
 {
   "$schema": "https://example.com/process-class-manifest-v1.schema.json",
-  "specVersion": "1.0",
+  "specVersion": "1.1",
   "type": "stdin",
   "name": "letak-worker-coopjednota",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Detects new COOP Jednota Slovensko leaflets on coop.sk/letaky (nationwide Potraviny/Supermarket/Tempo, Tempo, regional) and returns their metadata + PDF URLs (no downloads).",
   "author": "sim0n92",
   "repository": "https://github.com/sim0n92/letak-worker-coopjednota",
@@ -93,6 +93,187 @@
           },
           "fileSize": {
             "type": "integer"
+          }
+        }
+      }
+    },
+    "spec": {
+      "description": "Return the config and output JSON schemas (Proc-protocol 1.1).",
+      "input": {
+        "type": "object",
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "configSchema": {
+            "type": "object"
+          },
+          "outputSchema": {
+            "type": "object"
+          },
+          "protocol": {
+            "type": "string",
+            "const": "1.1"
+          }
+        }
+      }
+    },
+    "check": {
+      "description": "Test Source: fetch and parse the listing; ok when at least one leaflet is found.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "state": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "seen": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "pageUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "run": {
+      "description": "Detect new leaflets: items = leaflets not in state.seen (and of the requested types), state = seen keys.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "state": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "seen": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "pageUrl": {
+            "type": "string"
+          },
+          "knownLeaflets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Legacy compatibility: keys treated as already seen, in addition to state.seen."
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": [
+          "items",
+          "state",
+          "metrics",
+          "checks"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "url",
+                "meta"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "url": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "meta": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "validFrom",
+                    "validTo"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "validFrom": {
+                      "type": "string"
+                    },
+                    "validTo": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "state": {
+            "type": "object",
+            "required": [
+              "seen"
+            ],
+            "properties": {
+              "seen": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "leaflets": {
+                "type": "integer"
+              },
+              "newLeaflets": {
+                "type": "integer"
+              }
+            }
+          },
+          "checks": {
+            "type": "array"
           }
         }
       }
