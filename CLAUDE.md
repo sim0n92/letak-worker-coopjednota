@@ -56,9 +56,11 @@ decision trail if it needs revisiting.
   `types` filter and are new get the two extra fetches.
 - `type` comes from the leaflet name (`banner_of`): "Potraviny, Supermarket a
   Tempo" → `CoopPotraviny`, "Tempo" → `Tempo`, regional → `Regional`.
-- An empty list (`NO_LEAFLETS`) or a reported leaflet without PDF
-  (`PDF_NOT_FOUND`) is an error (exit 4): a redesign must not look like
-  "Completed, 0 leaflets" (it did for weeks in 2026-10).
+- An empty list (`NO_LEAFLETS`) is an error (exit 4): a redesign must not look like
+  "Completed, 0 leaflets" (it did for weeks in 2026-10). A reported leaflet without PDF
+  is `PDF_NOT_FOUND` (exit 4) only in the legacy `execute`; in proto 1.1 `check`/`run`
+  it is not an Item: skipped, not added to `state.seen`, counted in `metrics.skippedNoPdf`
+  and flagged by a `leaflets_without_pdf` warning check (some regional leaflets have no PDF).
 - `pageUrl` (input, optional) overrides the list URL — used by
   `tests/test_protocol.py` to point at local `file://` fixtures.
 - Keep `manifest.json` input/output schemas in sync with `execute`.

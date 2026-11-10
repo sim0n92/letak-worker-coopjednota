@@ -32,7 +32,7 @@ OUTPUT_SCHEMA: dict[str, Any] = {
             "meta": {"type": "object", "required": ["type", "validFrom", "validTo"], "properties": {
                 "type": {"type": "string"}, "validFrom": {"type": "string"}, "validTo": {"type": "string"}}}}}},
         "state": {"type": "object", "required": ["seen"], "properties": {"seen": {"type": "array", "items": {"type": "string"}}}},
-        "metrics": {"type": "object", "properties": {"leaflets": {"type": "integer"}, "newLeaflets": {"type": "integer"}}},
+        "metrics": {"type": "object", "properties": {"leaflets": {"type": "integer"}, "newLeaflets": {"type": "integer"}, "skippedNoPdf": {"type": "integer"}}},
         "checks": {"type": "array"},
     },
 }
@@ -76,7 +76,13 @@ def input_problem(input_data: dict[str, Any]) -> str | None:
 
 
 def build_run_result(found: list[dict], types: set[str], state_in: dict | None,
-                     key_of: Callable[[dict], str]) -> dict[str, Any]:
+                     key_of: Callable[[dict], str], skipped_no_pdf: list[str] | None = None) -> dict[str, Any]:
+    """`found` = the leaflets that can be grabbed; `skipped_no_pdf` = names of listed leaflets without a PDF (not Items)."""
+    skipped = list(skipped_no_pdf or [])
+    checks: list[dict[str, Any]] = [{"name": "leaflets_found", "passed": len(found) + len(skipped) > 0, "severity": "error"}]
+    if skipped:
+        checks.append({"name": "leaflets_without_pdf", "passed": False, "severity": "warning",
+                       "message": f"{len(skipped)} leaflet(s) without a PDF skipped: {', '.join(skipped)}"})
     seen = list((state_in or {}).get("seen") or [])
     known = set(seen)
     keyed = [(it, key_of(it)) for it in found]
@@ -86,6 +92,6 @@ def build_run_result(found: list[dict], types: set[str], state_in: dict | None,
         "items": [{"key": k, "url": it["url"], "meta": {"type": it["type"], "validFrom": it["from"], "validTo": it["to"]}}
                   for it, k in new],
         "state": {"seen": seen_out},
-        "metrics": {"leaflets": len(found), "newLeaflets": len(new)},
-        "checks": [{"name": "leaflets_found", "passed": len(found) > 0, "severity": "error"}],
+        "metrics": {"leaflets": len(found) + len(skipped), "newLeaflets": len(new), "skippedNoPdf": len(skipped)},
+        "checks": checks,
     }
