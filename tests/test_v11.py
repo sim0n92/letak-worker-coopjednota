@@ -147,7 +147,7 @@ def test_should_skip_leaflet_without_pdf_and_report_it_when_run(run_action, tmp_
     assert NITRA_KEY not in result["state"]["seen"]
     assert result["metrics"] == {"leaflets": 3, "newLeaflets": 2, "skippedNoPdf": 1}
     warning = next(c for c in result["checks"] if c["name"] == "leaflets_without_pdf")
-    assert (warning["passed"], warning["severity"]) == (False, "warning")
+    assert (warning["passed"], warning["severity"]) == (False, "warn")
     assert "Nitra" in warning["message"]
     Draft202012Validator(run_action("spec").result["outputSchema"]).validate(result)
 

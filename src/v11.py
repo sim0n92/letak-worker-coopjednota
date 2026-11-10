@@ -81,7 +81,7 @@ def build_run_result(found: list[dict], types: set[str], state_in: dict | None,
     skipped = list(skipped_no_pdf or [])
     checks: list[dict[str, Any]] = [{"name": "leaflets_found", "passed": len(found) + len(skipped) > 0, "severity": "error"}]
     if skipped:
-        checks.append({"name": "leaflets_without_pdf", "passed": False, "severity": "warning",
+        checks.append({"name": "leaflets_without_pdf", "passed": False, "severity": "warn",
                        "message": f"{len(skipped)} leaflet(s) without a PDF skipped: {', '.join(skipped)}"})
     seen = list((state_in or {}).get("seen") or [])
     known = set(seen)
