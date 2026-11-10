@@ -3,7 +3,7 @@
   "specVersion": "1.1",
   "type": "stdin",
   "name": "letak-worker-coopjednota",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Detects new COOP Jednota Slovensko leaflets on coop.sk/letaky (nationwide Potraviny/Supermarket/Tempo, Tempo, regional) and returns their metadata + PDF URLs (no downloads).",
   "author": "sim0n92",
   "repository": "https://github.com/sim0n92/letak-worker-coopjednota",
