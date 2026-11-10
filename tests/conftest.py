@@ -56,7 +56,7 @@ def listing_html(items=ITEMS) -> str:
     return f'<html><head><script type="application/ld+json">{json.dumps(doc)}</script></head><body></body></html>'
 
 
-def write_site(directory: Path, items=ITEMS, viewer: bool = True, listing: str | None = None) -> str:
+def write_site(directory: Path, items=ITEMS, viewer: bool = True, listing: str | None = None, no_pdf_slugs: tuple[str, ...] = ()) -> str:
     """listing -> leaflet pages -> viewer pages, all file:// (the viewer under .../indd.adobe.com/view/)."""
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "letaky.html").write_text(listing if listing is not None else listing_html(items), encoding="utf-8")
@@ -68,7 +68,7 @@ def write_site(directory: Path, items=ITEMS, viewer: bool = True, listing: str |
         manifest = json.dumps({"documentPdf": f"publication-web-resources/pdf/{slug}.pdf"})
         data = json.dumps({"MANIFEST_BODY": manifest, "VERSION_PREFIX": "v1"})
         (view / f"pub-{slug}").write_text(
-            f'<script name="reader-view-data">readerViewDataFromServer={data}</script>' if viewer else "<html></html>",
+            f'<script name="reader-view-data">readerViewDataFromServer={data}</script>' if viewer and slug not in no_pdf_slugs else "<html></html>",
             encoding="utf-8")
     return (directory / "letaky.html").as_uri()
 

@@ -39,7 +39,7 @@ def test_should_key_items_by_four_part_leaflet_key_when_run_on_fixture(run_actio
     assert tempo["url"].endswith("/publication/pub-tempo-1/v1/publication-web-resources/pdf/tempo-1.pdf")
     assert tempo["meta"] == {"type": "Tempo", "validFrom": "2026-01-01", "validTo": "2026-01-07"}
     assert sorted(result["state"]["seen"]) == ALL_KEYS
-    assert result["metrics"] == {"leaflets": 3, "newLeaflets": 3}
+    assert result["metrics"] == {"leaflets": 3, "newLeaflets": 3, "skippedNoPdf": 0}
     assert result["checks"] == [{"name": "leaflets_found", "passed": True, "severity": "error"}]
 
 
@@ -60,7 +60,7 @@ def test_should_return_no_items_when_run_again_with_returned_state(run_action, f
 
     assert again["items"] == []
     assert again["state"] == first["state"]
-    assert again["metrics"] == {"leaflets": 3, "newLeaflets": 0}
+    assert again["metrics"] == {"leaflets": 3, "newLeaflets": 0, "skippedNoPdf": 0}
 
 
 def test_should_not_resolve_pdfs_of_seen_leaflets_when_state_given(run_action, site_dir, fixture_config):
@@ -78,7 +78,7 @@ def test_should_filter_by_type_but_record_every_key_when_types_given(run_action,
 
     assert _keys(result) == [TEMPO_KEY]
     assert sorted(result["state"]["seen"]) == ALL_KEYS
-    assert result["metrics"] == {"leaflets": 3, "newLeaflets": 1}
+    assert result["metrics"] == {"leaflets": 3, "newLeaflets": 1, "skippedNoPdf": 0}
 
 
 def test_should_keep_newest_200_when_state_has_250_keys(run_action, fixture_config):
@@ -136,12 +136,52 @@ def test_should_report_system_error_when_run_finds_no_leaflets(run_action, empty
     assert "data" not in run.error
 
 
-def test_should_report_system_error_when_a_new_leaflet_has_no_pdf(run_action, tmp_path):
-    page = write_site(tmp_path / "nopdf", viewer=False)
+def test_should_skip_leaflet_without_pdf_and_report_it_when_run(run_action, tmp_path):
+    page = write_site(tmp_path / "nopdf", no_pdf_slugs=("nitra-1",))
 
     run = run_action("run", pageUrl=page)
 
-    assert run.error["code"] == "system_error"
+    assert run.returncode == 0
+    result = run.result
+    assert sorted(_keys(result)) == sorted([POTRAVINY_KEY, TEMPO_KEY])
+    assert NITRA_KEY not in result["state"]["seen"]
+    assert result["metrics"] == {"leaflets": 3, "newLeaflets": 2, "skippedNoPdf": 1}
+    warning = next(c for c in result["checks"] if c["name"] == "leaflets_without_pdf")
+    assert (warning["passed"], warning["severity"]) == (False, "warning")
+    assert "Nitra" in warning["message"]
+    Draft202012Validator(run_action("spec").result["outputSchema"]).validate(result)
+
+
+def test_should_report_leaflet_once_its_pdf_appears_when_it_was_skipped_before(run_action, tmp_path):
+    first = run_action("run", pageUrl=write_site(tmp_path / "before", no_pdf_slugs=("nitra-1",))).result
+
+    later = run_action("run", state=first["state"], pageUrl=write_site(tmp_path / "after")).result
+
+    assert _keys(later) == [NITRA_KEY]
+    assert later["metrics"]["skippedNoPdf"] == 0
+
+
+def test_should_succeed_with_no_items_when_no_leaflet_has_a_pdf(run_action, tmp_path):
+    run = run_action("run", pageUrl=write_site(tmp_path / "nopdf", viewer=False))
+
+    assert run.returncode == 0
+    assert run.result["items"] == []
+    assert run.result["state"]["seen"] == []
+    assert run.result["metrics"] == {"leaflets": 3, "newLeaflets": 0, "skippedNoPdf": 3}
+    assert next(c for c in run.result["checks"] if c["name"] == "leaflets_found")["passed"] is True
+
+
+def test_should_add_no_warning_when_every_leaflet_has_a_pdf(run_action, fixture_config):
+    checks = run_action("run", **fixture_config).result["checks"]
+
+    assert [c["name"] for c in checks] == ["leaflets_found"]
+
+
+def test_should_report_ok_when_check_meets_leaflets_without_pdf(run_action, tmp_path):
+    run = run_action("check", pageUrl=write_site(tmp_path / "nopdf", viewer=False))
+
+    assert run.returncode == 0
+    assert run.result["ok"] is True
 
 
 @pytest.mark.parametrize("legacy_code, expected", [

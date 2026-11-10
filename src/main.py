@@ -192,7 +192,7 @@ class CoopjednotaWorker(ProcessClass):
     def _key_of(leaflet):
         return coopjednota.leaflet_key(leaflet["type"], leaflet["from"], leaflet["to"], leaflet["id"])
 
-    def _scan(self, input_data, known=frozenset()):
+    def _scan(self, input_data, known=frozenset(), strict=True):
         """Fetches and parses the leaflet list: every leaflet {type, from, to, id, url}.
 
         The PDF (leaflet page -> InDesign viewer -> PDF) is resolved only for leaflets that pass the `types`
@@ -218,7 +218,7 @@ class CoopjednotaWorker(ProcessClass):
         for i, s in enumerate(stubs):
             if self.terminate_requested.is_set():
                 raise ManagedError("Terminated during fetch", code="TERMINATED", exit_code=EXIT_ERROR)
-            leaflet = {"type": s["type"], "from": s["validFrom"], "to": s["validTo"], "id": s["slug"], "url": None}
+            leaflet = {"type": s["type"], "from": s["validFrom"], "to": s["validTo"], "id": s["slug"], "url": None, "name": s["name"]}
             found.append(leaflet)
             if (wanted and s["type"].lower() not in wanted) or self._key_of(leaflet) in known:
                 continue
@@ -231,23 +231,26 @@ class CoopjednotaWorker(ProcessClass):
             except Exception as e:
                 self.logger.warning("Failed to resolve the PDF of %s: %s", s["detailUrl"], e)
             if not pdf:
-                no_pdf.append(s["name"]); continue
+                no_pdf.append(s["name"]); leaflet["noPdf"] = True; continue
             leaflet["url"] = pdf
-        if no_pdf:
+        if no_pdf and strict:
             raise ManagedError(f"No PDF found for {no_pdf} - leaflet page or viewer layout changed?",
                                code="PDF_NOT_FOUND", exit_code=EXIT_DEPENDENCY)
-        return found
+        return found, no_pdf
 
     def v11_check(self, input_data):
-        self._scan(input_data)
+        self._scan(input_data, strict=False)
         return {"ok": True}
 
     def v11_run(self, input_data):
         state = dict(input_data.get("state") or {})
         state["seen"] = list(state.get("seen") or []) + list(input_data.get("knownLeaflets") or [])
         wanted = {str(t).lower() for t in (input_data.get("types") or [])}
-        found = self._scan(input_data, known=set(state["seen"]))
-        return v11.build_run_result(found, wanted, state, self._key_of)
+        found, no_pdf = self._scan(input_data, known=set(state["seen"]), strict=False)
+        # a leaflet without a PDF is not an Item (it cannot be grabbed): it is neither reported nor remembered as seen
+        # (so it is picked up once its PDF appears), only counted and flagged
+        with_pdf = [lf for lf in found if not lf.get("noPdf")]
+        return v11.build_run_result(with_pdf, wanted, state, self._key_of, skipped_no_pdf=no_pdf)
 
     def execute(self, input_data):
         output_path = input_data.get("outputPath")
@@ -257,7 +260,7 @@ class CoopjednotaWorker(ProcessClass):
         wanted = {str(t).lower() for t in (input_data.get("types") or [])}
         url = input_data.get("pageUrl") or coopjednota.DEFAULT_URL
 
-        matched = [lf for lf in self._scan(input_data, known=known) if lf["url"]]
+        matched = [{k: v for k, v in lf.items() if k not in ("name", "noPdf")} for lf in self._scan(input_data, known=known)[0] if lf["url"]]
 
         self.report(90, "Writing output")
         result_doc = {
